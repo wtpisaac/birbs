@@ -1,0 +1,104 @@
+{
+  "version": 9,
+  "configurePresets": [
+    {
+      "name": "windows-default",
+      "displayName": "Windows x64 Debug",
+      "description": "Sets Ninja generator, compilers, x64 architecture, build and install directory, debug build type",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "architecture": {
+        "value": "x64",
+        "strategy": "external"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}"
+      },
+      "vendor": {
+        "microsoft.com/VisualStudioSettings/CMake/1.0": {
+          "hostOS": [ "Windows" ]
+        }
+      }
+    },
+    {
+      "name": "windows-debug-asan",
+      "inherits": "windows-default",
+      "displayName": "Windows x64 Debug (ASan)",
+      "description": "Sets Ninja generator, compilers, x64 architecture, build and install directory, debug build type with ASan enabled",
+      "cacheVariables": {
+        "ENABLE_ASAN": true
+      }
+    },
+    {
+      "name": "base-clang",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+      },
+      "displayName": "Base Clang Config",
+      "description": "Sets up common environment variables for Clang on Linux.",
+      "generator": "Unix Makefiles",
+      "environment": {
+        "CC": "clang",
+        "CXX": "clang++"
+      }
+    },
+    {
+      "name": "clang-debug",
+      "displayName": "Clang Debug",
+      "description": "Configures a debug build with Clang and debug symbols for LLDB.",
+      "inherits": "base-clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true
+      }
+    },
+    {
+      "name": "clang-debug-asan",
+      "displayName": "Clang Debug (ASan)",
+      "description": "Configures a debug build with Clang and debug symbols for LLDB, and enables ASAN.",
+      "inherits": "base-clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true,
+        "ENABLE_ASAN": true
+      }
+    },
+    {
+      "name": "clang-release",
+      "displayName": "Clang Release",
+      "description": "Configures a release build with Clang optimizations.",
+      "inherits": "base-clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": true
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "Windows Debug (Parallel)",
+      "displayName": "Windows Debug (MSVC)",
+      "configurePreset": "windows-default",
+      "jobs": 999
+    },
+    {
+      "name": "Windows Debug ASan (Parallel)",
+      "displayName": "Windows Debug ASan (MSVC)",
+      "configurePreset": "windows-debug-asan",
+      "jobs": 999
+    },
+    {
+      "name": "Debug (Parallel)",
+      "displayName": "Debug (Clang)",
+      "configurePreset": "clang-debug",
+      "jobs": 999
+    },
+    {
+      "name": "Debug ASan (Parallel)",
+      "displayName": "Debug ASan (Clang)",
+      "configurePreset": "clang-debug-asan",
+      "jobs": 999
+    }
+  ]
+}
