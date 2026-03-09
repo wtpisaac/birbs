@@ -29,11 +29,6 @@ option(
 # get compile commands so clangd extension can read from them
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_subdirectory(
-    vendored/glm
-    EXCLUDE_FROM_ALL
-)
-
 # create an executable target which calls into the library code
 # so we can next have a test target which also calls into the library
 add_executable(
@@ -54,12 +49,6 @@ set_property(
     PROPERTY
     CXX_STANDARD_REQUIRED
     ON
-)
-
-target_link_libraries(
-    birbs
-    PRIVATE
-    glm::glm
 )
 
 if(ENABLE_ASAN)
