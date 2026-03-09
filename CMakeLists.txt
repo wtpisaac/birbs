@@ -34,6 +34,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_executable(
     birbs
     src/main.cpp
+    src/ecs/entity_manager.cpp
 )
 
 set_property(
@@ -49,6 +50,20 @@ set_property(
     PROPERTY
     CXX_STANDARD_REQUIRED
     ON
+)
+
+add_subdirectory(
+    vendored/raylib
+)
+add_subdirectory(
+    vendored/quill
+)
+
+target_link_libraries(
+    birbs
+    PRIVATE
+    quill
+    raylib
 )
 
 if(ENABLE_ASAN)
