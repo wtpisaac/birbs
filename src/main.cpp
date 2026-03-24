@@ -21,6 +21,8 @@
 #define ARENA_PANEL_Y ARENA_PANEL_PADDING_TOP
 
 #define ENTITY_SIZE 20.0
+#define ENTITY_INTERIOR_SCALE 0.8
+#define ENTITY_DESIRED_SPEED 0.5
 
 #define APPLICATION_TITLE "birbs"
 
@@ -28,6 +30,14 @@ struct Triangle {
     Vector2 v1;
     Vector2 v2;
     Vector2 v3;
+
+    Triangle scaled(float scale) {
+        return Triangle {
+            .v1 = Vector2Scale(this->v1, scale),
+            .v2 = Vector2Scale(this->v2, scale),
+            .v3 = Vector2Scale(this->v3, scale),
+        };
+    }
 
     Triangle rotate(float angle) {
         return Triangle {
@@ -77,9 +87,25 @@ struct Heading {
 };
 
 struct Velocity {
-    float speed;
-    float magnitude;
+    Vector2 velocity;
 };
+
+struct Deletable {
+    bool shouldDelete;
+};
+
+/* AI Behavior Definitions
+
+Space to take some notes from the book:
+
+- Entities should have steering behaviors
+- These should probably be weighted but choosing the weights is difficult
+- You can do a prioritization algorithm to allocate forces instead. might be worth trying
+that up front since balancing the weights dynamically seems like a harder variant of this
+- probably worth creating a chaining behavior to push away from entities but target a tail?
+
+start with random flights
+*/
 
 /* === Standalone Methods ================================================== */
 
@@ -106,6 +132,7 @@ void processMouseInput(
     }
 
     newEntity = registry.create();
+    registry.emplace<Deletable>(newEntity, false);
     registry.emplace<Position>(newEntity, pos);
     
     auto heading = 
@@ -128,8 +155,66 @@ void processInput(
 
 /* === Logic =============================================================== */
 
-void update() {
-    
+void basic_flight(
+    entt::registry& registry
+) {
+    auto view = registry.view<Position, const Heading>();
+
+    view.each([&registry](Position &pos, const Heading &heading) {
+        auto headingVector = 
+            Vector2Normalize(
+                Vector2Rotate(
+                    Vector2 { .y = 1.0 },
+                    heading.heading
+                )
+            );
+        
+        pos.pos = Vector2Add(
+            pos.pos,
+            Vector2Scale(
+                headingVector,
+                ENTITY_DESIRED_SPEED
+            )
+        );
+    });
+}
+
+void delete_outside_bounds(
+    entt::registry& registry
+) {
+    auto view = registry.view<const Position, Deletable>();
+
+    view.each([&registry](const Position &pos, Deletable &del) {
+        if(
+            pos.pos.x < ARENA_PANEL_X - (ENTITY_SIZE) 
+            || pos.pos.x > (ARENA_PANEL_X + ARENA_PANEL_WIDTH + ENTITY_SIZE)
+            || pos.pos.y < ARENA_PANEL_Y - ENTITY_SIZE
+            || pos.pos.y > (ARENA_PANEL_Y + ARENA_PANEL_HEIGHT + ENTITY_SIZE)
+        ) [[unlikely]] {
+            del.shouldDelete = true;
+        }
+    });
+}
+
+void deletable_system(
+    entt::registry& registry
+) {
+    auto view = registry.view<const Deletable>();
+
+    view.each([&registry](const entt::entity entity, const Deletable &deletable) {
+        if(deletable.shouldDelete) {
+            registry.destroy(entity);
+            BIRBS_LOG_INFO("deleting birb");
+        }
+    });
+}
+
+void update(
+    entt::registry &registry
+) {
+    basic_flight(registry);
+    delete_outside_bounds(registry);
+    deletable_system(registry);
 }
 
 /* === Rendering =========================================================== */
@@ -149,16 +234,29 @@ void renderBirbs(
     auto view = registry.view<const Position, const Heading>();
 
     view.each([](const Position &pos, const Heading &heading){
-        auto entityTriangle = TRIANGLE_EQ;
-        entityTriangle = entityTriangle.rotate(heading.heading);
-        entityTriangle = entityTriangle.move(
+        auto entityInteriorTriangle = TRIANGLE_EQ;
+        entityInteriorTriangle = entityInteriorTriangle.scaled(ENTITY_INTERIOR_SCALE);
+        entityInteriorTriangle = entityInteriorTriangle.rotate(heading.heading);
+        entityInteriorTriangle = entityInteriorTriangle.move(
+            pos.pos
+        );
+
+        auto entityStrokeTriangle = TRIANGLE_EQ;
+        entityStrokeTriangle = entityStrokeTriangle.rotate(heading.heading);
+        entityStrokeTriangle = entityStrokeTriangle.move(
             pos.pos
         );
 
         DrawTriangle(
-            entityTriangle.v3,
-            entityTriangle.v2,
-            entityTriangle.v1,
+            entityStrokeTriangle.v3,
+            entityStrokeTriangle.v2,
+            entityStrokeTriangle.v1,
+            BLACK
+        );
+        DrawTriangle(
+            entityInteriorTriangle.v3,
+            entityInteriorTriangle.v2,
+            entityInteriorTriangle.v1,
             WHITE
         );
     });
@@ -215,7 +313,7 @@ int main()
     // Run loop
     while(!WindowShouldClose() && !shouldExit) {
         processInput(registry);
-        update();
+        update(registry);
         render(
             shouldExit,
             registry
