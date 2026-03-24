@@ -1,4 +1,4 @@
-#include "entt/entity/fwd.hpp"
+#include <cstdlib>
 #include <entt/entt.hpp>
 
 #include <raylib.h>
@@ -22,7 +22,8 @@
 
 #define ENTITY_SIZE 20.0
 #define ENTITY_INTERIOR_SCALE 0.8
-#define ENTITY_DESIRED_SPEED 0.5
+#define ENTITY_ACCELERATION 0.05
+#define ENTITY_DESIRED_MAX_SPEED 3.0
 
 #define APPLICATION_TITLE "birbs"
 
@@ -115,8 +116,10 @@ void processMouseInput(
     entt::registry& registry
 ) {
     Vector2 pos;
+    Vector2 vel;
     bool isClick;
     entt::entity newEntity;
+    float heading;
 
     pos = GetMousePosition();
     isClick = IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
@@ -135,9 +138,19 @@ void processMouseInput(
     registry.emplace<Deletable>(newEntity, false);
     registry.emplace<Position>(newEntity, pos);
     
-    auto heading = 
+    heading = 
         static_cast<float>(GetRandomValue(0, 359));
     registry.emplace<Heading>(newEntity, heading);
+
+    // Create initial velocity vector
+    vel = Vector2Scale(
+        Vector2Normalize(Vector2Rotate(
+            Vector2 { .y = 1.0 },
+            heading
+        )), 
+        0.5
+    );
+    registry.emplace<Velocity>(newEntity, vel);
 
     BIRBS_LOG_INFO(
         "Created birb at {}, {} with rotation {}",
@@ -155,26 +168,38 @@ void processInput(
 
 /* === Logic =============================================================== */
 
+void acceleration_system(
+    entt::registry &registry
+) {
+    auto view = registry.view<Velocity, const Heading>();
+
+    view.each([&registry](Velocity &vel, const Heading &heading) {
+        auto magnitude = Vector2Length(vel.velocity);
+        auto change = Clamp(
+            ENTITY_DESIRED_MAX_SPEED - magnitude,
+            0.0,
+            ENTITY_ACCELERATION
+        );
+        auto newMagnitude = magnitude + change;
+        vel.velocity = Vector2Scale(
+        Vector2Normalize(Vector2Rotate(
+                Vector2{ .y = 1.0 }, 
+                heading.heading
+            )), 
+            newMagnitude
+        );
+    });
+}
+
 void basic_flight(
     entt::registry& registry
 ) {
-    auto view = registry.view<Position, const Heading>();
+    auto view = registry.view<Position, const Velocity>();
 
-    view.each([&registry](Position &pos, const Heading &heading) {
-        auto headingVector = 
-            Vector2Normalize(
-                Vector2Rotate(
-                    Vector2 { .y = 1.0 },
-                    heading.heading
-                )
-            );
-        
+    view.each([&registry](Position &pos, const Velocity &vel) {
         pos.pos = Vector2Add(
             pos.pos,
-            Vector2Scale(
-                headingVector,
-                ENTITY_DESIRED_SPEED
-            )
+            vel.velocity
         );
     });
 }
@@ -212,6 +237,7 @@ void deletable_system(
 void update(
     entt::registry &registry
 ) {
+    acceleration_system(registry);
     basic_flight(registry);
     delete_outside_bounds(registry);
     deletable_system(registry);
