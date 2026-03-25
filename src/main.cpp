@@ -22,8 +22,11 @@
 
 #define ENTITY_SIZE 20.0
 #define ENTITY_INTERIOR_SCALE 0.8
-#define ENTITY_ACCELERATION 0.05
+#define ENTITY_ACCELERATION 0.25
 #define ENTITY_DESIRED_MAX_SPEED 3.0
+
+#define PRIORITY_WALL 0.8
+#define PRIORITY_SPEED 0.2
 
 #define APPLICATION_TITLE "birbs"
 
@@ -99,6 +102,14 @@ struct Velocity {
     Vector2 velocity;
 };
 
+struct SpeedUpForce {
+    Vector2 speedUpForce;
+};
+
+struct AvoidWallsForce {
+    Vector2 avoidWallsForce;
+};
+
 struct Deletable {
     bool shouldDelete;
 };
@@ -158,6 +169,8 @@ void processMouseInput(
         0.5
     );
     registry.emplace<Velocity>(newEntity, vel);
+    registry.emplace<SpeedUpForce>(newEntity, Vector2Zero());
+    registry.emplace<AvoidWallsForce>(newEntity, Vector2Zero());
 
     BIRBS_LOG_INFO(
         "Created birb at {}, {} with rotation {}",
@@ -175,24 +188,64 @@ void processInput(
 
 /* === Logic =============================================================== */
 
-void acceleration_system(
+void speed_up_force_system(
     entt::registry &registry
 ) {
-    auto view = registry.view<Velocity>();
+    auto view = registry.view<SpeedUpForce, const Velocity>();
 
-    view.each([&registry](Velocity &vel) {
+    view.each([&registry](SpeedUpForce &force, const Velocity &vel) {
         auto normalized = Vector2Normalize(vel.velocity);
         auto magnitude = Vector2Length(vel.velocity);
         auto change = Clamp(
             ENTITY_DESIRED_MAX_SPEED - magnitude,
-            0.0,
+            -1 * ENTITY_ACCELERATION,
             ENTITY_ACCELERATION
         );
-        auto newMagnitude = magnitude + change;
-        vel.velocity = Vector2Scale(
-            normalized,
-            newMagnitude
+        force.speedUpForce = Vector2Scale(normalized, change);
+    });
+}
+
+void avoid_walls_force_system(
+    entt::registry &registry
+) {
+    auto view = registry.view<const Position, AvoidWallsForce>();
+
+    view.each([](const Position &pos, AvoidWallsForce &avoidWallsForce) {
+        bool avoidLeftWall = (pos.pos.x < (ARENA_PANEL_X + (2 * ENTITY_SIZE)));
+        bool avoidRightWall = (pos.pos.x > ((ARENA_PANEL_X + ARENA_PANEL_WIDTH) - (2 * ENTITY_SIZE)));
+        bool avoidTopWall = (pos.pos.y < (ARENA_PANEL_Y + (2 * ENTITY_SIZE)));
+        bool avoidBottomWall = (pos.pos.y > ((ARENA_PANEL_Y + ARENA_PANEL_HEIGHT) - (2 * ENTITY_SIZE)));
+
+        Vector2 avoid = Vector2Zero();
+
+        if(avoidLeftWall) { avoid = Vector2Add(avoid, Vector2 { .x = 1.0 }); };
+        if(avoidRightWall) { avoid = Vector2Add(avoid, Vector2 { .x = -1.0 }); };
+        if(avoidTopWall) { avoid = Vector2Add(avoid, Vector2 { .y = 1.0 }); };
+        if(avoidBottomWall) { avoid = Vector2Add(avoid, Vector2 { .y = -1.0 }); };
+
+        avoidWallsForce.avoidWallsForce = Vector2Scale(Vector2Normalize(avoid), ENTITY_ACCELERATION);
+    });
+}
+
+void acceleration_system(
+    entt::registry &registry
+) {
+    auto view = registry.view<const SpeedUpForce, const AvoidWallsForce, Velocity>();
+
+    view.each([&registry](const SpeedUpForce &speedUp, const AvoidWallsForce &avoid, Velocity &vel) {
+        auto magnitude = Vector2Length(vel.velocity);
+        auto normalized = Vector2Normalize(vel.velocity);
+
+        auto resultantForce = Vector2Add(
+            Vector2Scale(
+                speedUp.speedUpForce, PRIORITY_SPEED),
+            Vector2Scale(
+                avoid.avoidWallsForce, PRIORITY_WALL
+            )
         );
+
+        auto newVelocity = Vector2Add(vel.velocity, resultantForce);
+        vel.velocity = newVelocity;
     });
 }
 
@@ -242,8 +295,12 @@ void deletable_system(
 void update(
     entt::registry &registry
 ) {
+    avoid_walls_force_system(registry);
+    speed_up_force_system(registry);
     acceleration_system(registry);
+
     basic_flight(registry);
+
     delete_outside_bounds(registry);
     deletable_system(registry);
 }
