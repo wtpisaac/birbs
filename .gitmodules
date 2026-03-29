@@ -7,3 +7,6 @@
 [submodule "vendored/entt"]
 	path = vendored/entt
 	url = https://github.com/skypjack/entt.git
+[submodule "vendored/unordered_dense"]
+	path = vendored/unordered_dense
+	url = https://github.com/martinus/unordered_dense.git

@@ -61,6 +61,9 @@ add_subdirectory(
 add_subdirectory(
     vendored/quill
 )
+add_subdirectory(
+    vendored/unordered_dense
+)
 
 # Raygui does not include a header, so we just define an interface library and
 # link it
@@ -78,6 +81,7 @@ target_link_libraries(
     quill
     raylib
     raygui
+    unordered_dense::unordered_dense
 )
 
 if(ENABLE_ASAN)
