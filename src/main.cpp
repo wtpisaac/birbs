@@ -13,10 +13,10 @@
 #define WINDOW_WIDTH 1280
 #define WINDOW_HEIGHT 720
 
-#define ARENA_PANEL_PADDING_TOP (20 + RAYGUI_WINDOWBOX_STATUSBAR_HEIGHT)
-#define ARENA_PANEL_PADDING_SIDES (20)
-#define ARENA_PANEL_HEIGHT (400)
-#define ARENA_PANEL_WIDTH (WINDOW_WIDTH - (ARENA_PANEL_PADDING_SIDES * 2))
+#define ARENA_PANEL_PADDING_TOP 0
+#define ARENA_PANEL_PADDING_SIDES 0
+#define ARENA_PANEL_HEIGHT WINDOW_HEIGHT
+#define ARENA_PANEL_WIDTH WINDOW_WIDTH
 #define ARENA_PANEL_X 0 + ARENA_PANEL_PADDING_SIDES
 #define ARENA_PANEL_Y ARENA_PANEL_PADDING_TOP
 
@@ -310,10 +310,11 @@ void update(
 void renderUI(
     bool& shouldExit
 ) {
-    shouldExit = GuiWindowBox(
-        Rectangle { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT },
-        APPLICATION_TITLE
-    );
+    // shouldExit = GuiWindowBox(
+    //     Rectangle { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT },
+    //     APPLICATION_TITLE
+    // );
+    shouldExit = false;
 }
 
 void renderBirbs(
