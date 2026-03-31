@@ -1,4 +1,7 @@
+#include "entt/entity/fwd.hpp"
 #include <cstdlib>
+
+#include <ankerl/unordered_dense.h>
 #include <entt/entt.hpp>
 
 #include <raylib.h>
@@ -110,9 +113,16 @@ struct AvoidWallsForce {
     Vector2 avoidWallsForce;
 };
 
-struct Deletable {
-    bool shouldDelete;
+struct Following {
+    entt::entity following;
 };
+
+struct Followed {
+    entt::entity follower;
+    Vector2 desiredFollowerPosition;
+};
+
+struct ToDelete {};
 
 /* AI Behavior Definitions
 
@@ -129,10 +139,18 @@ start with random flights
 
 /* === Standalone Methods ================================================== */
 
+/* === Leader-Follower Tracking ============================================ */
+
+struct GameState {
+    entt::registry registry;
+    entt::entity pack_leader { entt::null };
+    entt::entity pack_trailer { entt::null };
+};
+
 /* === Input =============================================================== */
 
 void processMouseInput(
-    entt::registry& registry
+    GameState &gameState
 ) {
     Vector2 pos;
     Vector2 vel;
@@ -153,9 +171,23 @@ void processMouseInput(
         return;
     }
 
-    newEntity = registry.create();
-    registry.emplace<Deletable>(newEntity, false);
-    registry.emplace<Position>(newEntity, pos);
+    newEntity = gameState.registry.create();
+
+    if(gameState.pack_leader == entt::null) [[unlikely]] {
+        BIRBS_LOG_INFO("pack leader created!");
+        gameState.pack_leader = newEntity;
+        gameState.pack_trailer = newEntity;
+    } else {
+        gameState.registry.emplace<Following>(newEntity, gameState.pack_trailer);
+        gameState.registry.emplace<Followed>(gameState.pack_trailer, Followed {
+            .desiredFollowerPosition = gameState.registry.get<Position>(gameState.pack_trailer).pos,
+            .follower = newEntity
+        });
+
+        gameState.pack_trailer = newEntity;
+    }
+
+    gameState.registry.emplace<Position>(newEntity, pos);
     
     heading = 
         static_cast<float>(GetRandomValue(0, 359));
@@ -168,9 +200,9 @@ void processMouseInput(
         )), 
         0.5
     );
-    registry.emplace<Velocity>(newEntity, vel);
-    registry.emplace<SpeedUpForce>(newEntity, Vector2Zero());
-    registry.emplace<AvoidWallsForce>(newEntity, Vector2Zero());
+    gameState.registry.emplace<Velocity>(newEntity, vel);
+    gameState.registry.emplace<SpeedUpForce>(newEntity, Vector2Zero());
+    gameState.registry.emplace<AvoidWallsForce>(newEntity, Vector2Zero());
 
     BIRBS_LOG_INFO(
         "Created birb at {}, {} with rotation {}",
@@ -181,27 +213,56 @@ void processMouseInput(
 }
 
 void processInput(
-    entt::registry& registry
+    GameState &gameState
 ) {
-    processMouseInput(registry);
+    processMouseInput(gameState);
 }
 
 /* === Logic =============================================================== */
 
-void speed_up_force_system(
-    entt::registry &registry
+void pack_leader_system(
+    GameState &gameState
 ) {
-    auto view = registry.view<SpeedUpForce, const Velocity>();
+    auto packLeader = gameState.pack_leader;
+    if(packLeader == entt::null) [[unlikely]] {
+        return;
+    }
+    auto [velocity] = gameState.registry.get<Velocity>(packLeader);
 
-    view.each([&registry](SpeedUpForce &force, const Velocity &vel) {
-        auto normalized = Vector2Normalize(vel.velocity);
-        auto magnitude = Vector2Length(vel.velocity);
+    auto normalized = Vector2Normalize(velocity);
+    auto magnitude = Vector2Length(velocity);
+    auto change = Clamp(
+        ENTITY_DESIRED_MAX_SPEED - magnitude,
+        -1 * ENTITY_ACCELERATION,
+        ENTITY_ACCELERATION
+    );
+    
+    gameState.registry.replace<SpeedUpForce>(packLeader, Vector2Scale(normalized, change));
+}
+
+void follow_leaders_seek_system(
+    GameState &gameState
+) {
+    auto view = gameState.registry.view<const Following, const Velocity, const Position, SpeedUpForce>();
+
+    view.each([&gameState](const Following &following, const Velocity &vel, const Position &pos, SpeedUpForce &force) {
+        auto followed = gameState.registry.get<Followed>(following.following);
+        
+        auto displacement = Vector2Subtract(followed.desiredFollowerPosition, pos.pos);
+        auto normalized = Vector2Normalize(displacement);
+        auto magnitude = Vector2Length(displacement);
         auto change = Clamp(
-            ENTITY_DESIRED_MAX_SPEED - magnitude,
-            -1 * ENTITY_ACCELERATION,
-            ENTITY_ACCELERATION
+            magnitude,
+            -1 * ENTITY_DESIRED_MAX_SPEED,
+            ENTITY_DESIRED_MAX_SPEED
         );
-        force.speedUpForce = Vector2Scale(normalized, change);
+
+        // Attempt #3, follow what the book says and compute _change_ in desired velocity
+        Vector2 appliedSpeedForce = Vector2Subtract(
+            Vector2Scale(normalized, change),
+            vel.velocity
+        );
+        force.speedUpForce = appliedSpeedForce;
     });
 }
 
@@ -249,6 +310,25 @@ void acceleration_system(
     });
 }
 
+void update_follower_positions(
+    entt::registry &registry
+) {
+    auto view = registry.view<Followed, const Position, const Velocity>();
+
+    view.each([](Followed &followed, const Position &pos, const Velocity &vel) {
+        auto normalized = Vector2Normalize(vel.velocity);
+
+        auto newFollowerPosition = Vector2Add(
+            pos.pos,
+            Vector2Scale(
+                normalized,
+                -2 * ENTITY_SIZE
+            )
+        );
+        followed.desiredFollowerPosition = newFollowerPosition;
+    });
+}
+
 void basic_flight(
     entt::registry& registry
 ) {
@@ -262,47 +342,84 @@ void basic_flight(
     });
 }
 
+// TODO: Deletion support for following system
+
 void delete_outside_bounds(
     entt::registry& registry
 ) {
-    auto view = registry.view<const Position, Deletable>();
+    auto view = registry.view<const Position>();
 
-    view.each([&registry](const Position &pos, Deletable &del) {
+    view.each([&registry](const entt::entity entity, const Position &pos) {
         if(
             pos.pos.x < ARENA_PANEL_X - (ENTITY_SIZE) 
             || pos.pos.x > (ARENA_PANEL_X + ARENA_PANEL_WIDTH + ENTITY_SIZE)
             || pos.pos.y < ARENA_PANEL_Y - ENTITY_SIZE
             || pos.pos.y > (ARENA_PANEL_Y + ARENA_PANEL_HEIGHT + ENTITY_SIZE)
         ) [[unlikely]] {
-            del.shouldDelete = true;
+            registry.emplace<ToDelete>(entity);
         }
     });
 }
+
+// FIXME: There is a better way
+// Right now we manually compare to game state, but,
+// a followed entity with no following is the leader
+// a following entity with no followed is the trail
+// every other entity is in the middle, by definition
+// maybe better to just take advantage of that with three view.each() blocks
+// but i am too tired to do that right now and have to put off this much more interesting
+// programming than my day job until later :(
+
+// void repair_pack_state_for_deletions(
+//     GameState &gameState
+// ) {
+//     auto view = gameState.registry.view<ToDelete>();
+
+//     view.each([&gameState](const entt::entity entity) {
+//         // Case: Head of pack
+//         if(gameState.pack_leader == entity) {
+//             // do we have a follower?
+//             auto followed = gameState.registry.try_get<Followed>(entity);
+//             if(followed == nullptr) {
+//                 gameState.pack_leader = entt::null;
+//                 gameState.pack_trailer = entt::null;
+//                 return;
+//             } else {
+//                 gameState.pack_leader = followed->follower;
+//                 gameState.registry.remove<Following>(followed->follower);
+//             }
+//         } else if(gameState.pack_trailer{
+//             // Case: Tail of pack
+//             // Do we have any follower?
+
+//         }
+//     });
+// }
 
 void deletable_system(
     entt::registry& registry
 ) {
-    auto view = registry.view<const Deletable>();
+    auto view = registry.view<const ToDelete>();
 
-    view.each([&registry](const entt::entity entity, const Deletable &deletable) {
-        if(deletable.shouldDelete) {
-            registry.destroy(entity);
-            BIRBS_LOG_INFO("deleting birb");
-        }
+    view.each([&registry](const entt::entity entity) {
+        registry.destroy(entity);
+        BIRBS_LOG_INFO("deleting birb");
     });
 }
 
 void update(
-    entt::registry &registry
+    GameState &gameState
 ) {
-    avoid_walls_force_system(registry);
-    speed_up_force_system(registry);
-    acceleration_system(registry);
+    avoid_walls_force_system(gameState.registry);
+    pack_leader_system(gameState);
+    follow_leaders_seek_system(gameState);
+    acceleration_system(gameState.registry);
 
-    basic_flight(registry);
+    basic_flight(gameState.registry);
+    update_follower_positions(gameState.registry);
 
-    delete_outside_bounds(registry);
-    deletable_system(registry);
+    delete_outside_bounds(gameState.registry);
+    deletable_system(gameState.registry);
 }
 
 /* === Rendering =========================================================== */
@@ -382,12 +499,13 @@ void render(
     EndDrawing();
 }
 
-
 /* === Main Loop =========================================================== */
 int main()
 {
     bool shouldExit {false};
-    entt::registry registry;
+    GameState gameState = {
+        .registry = entt::registry()
+    };
 
     BIRBS_LOG_INFO(
         "birbs!"
@@ -403,11 +521,11 @@ int main()
 
     // Run loop
     while(!WindowShouldClose() && !shouldExit) {
-        processInput(registry);
-        update(registry);
+        processInput(gameState);
+        update(gameState);
         render(
             shouldExit,
-            registry
+            gameState.registry
         );
     }
 
